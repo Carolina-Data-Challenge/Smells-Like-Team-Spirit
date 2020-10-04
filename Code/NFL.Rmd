@@ -1,0 +1,222 @@
+---
+title: "NFL: Predicting 'Wins'"
+author: "Smells Like Team Spirit"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(readr)
+library(car)
+library(corrplot) 
+library(leaps) 
+library(Stat2Data)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(GGally)
+source("ShowSubsets.R")
+source("VIF.R")
+
+library(RCurl)
+
+nfl_all_data <- read.csv("nfl_all_data.csv")
+head(nfl_all_data)
+```
+I) Predicting wins of an NFL team
+
+1. Correlation between predictors and Full Model with all predictors
+```{r}
+#nfl_tr = subset(nfl_all_data, Year != 2013)[3:26]
+#nfl_te = subset(nfl_all_data, Year == 2013)[3:26]
+
+nfl_data = nfl_all_data[3:26]
+
+Fullnfl = lm(Wins~., nfl_data) 
+summary(Fullnfl)
+
+corr = cor(nfl_data, use="pairwise.complete.obs")
+corrplot(corr, type="upper")
+
+vif(Fullnfl)
+
+#cfb_tr = subset(cfb_all_data, Year != 2013)[3:19]
+#cfb_te = subset(cfb_all_data, Year == 2013)[3:19]
+
+#Fullcfb = lm(Wins~., cfb_tr) 
+#summary(Fullcfb)
+
+#corr = cor(cfb_tr, use="pairwise.complete.obs")
+#corrplot(corr, type="upper")
+
+#vif(Fullcfb)
+
+```
+We plot the correlation graph of our 23 potential predictors to check if we need to take out possible highly related predictors. (The bigger the circle implies higher correction between the two predictors that have their row and column intersect at that circle) Most of the predictors look in shape, so we will keep all predictors for further subset selection process. 
+
+2. Determining number of predictors to include in our model. 
+
+2a. Use the regsubsets function from leaps package to perform best subset selection in order to choose the best model containing our 23 predictors according to Cp, BIC, and adjusted R2.
+```{r}
+# create datasets for plots
+### criteria labels (in plotmath, see expression syntax in ?plotmath)
+degree <- 23
+model.regsubsets <- summary(regsubsets(Wins ~ ., data = nfl_data, nvmax = degree))
+
+criteria.plotmath <- c(
+cp = "C[p]",
+bic = "BIC",
+adjr2 = "Adjusted~R^2"
+)
+criteria_names <- c("cp", "bic", "adjr2")
+data_plot <- model.regsubsets[criteria_names] %>% data.frame(size = 1:degree) %>% 
+  gather(cp, bic, adjr2, key = "criteria", value = "value") %>% mutate(criteria_label = criteria.plotmath[criteria])
+data_best <- data_plot %>% group_by(criteria) %>% # min of Cp, BIC; max of Adjusted R^2
+top_n(1, ifelse(criteria == "adjr2", value, - value))
+# generate plots of criteria with respect to the number of predictors
+data_plot %>%
+ggplot(aes(x = size, y = value)) +
+geom_line() +
+geom_point(data = data_best, colour = "red", shape = "x", size = 5) +
+geom_vline(data = data_best, aes(xintercept = size), colour = "red", linetype = "dashed") +
+scale_x_continuous(name = "Number of Predictors", breaks = 1:degree) +
+facet_wrap(~ criteria_label, scales = "free_y", labeller = label_parsed)
+```
+According to Adjusted R^2, our optimal model would have 10 predictors.\newline
+According to BIC, our optimal model would have 3 predictors.\newline
+According to Cp, our optimal model would have 6 predictors.\newline
+Since these subset selection process according to these three criteria do not quite match with each other, we decide to seek for better conclusion considering forward stepwise selection and also using backwards stepwise selection.
+
+2b. Stepwise selection
+i) Forward Stepwise Selection Method
+```{r}
+model.regsubsets <- regsubsets(Wins ~ ., data = nfl_data,
+method = "forward",
+nvmax = degree) %>% summary()
+
+data_plot <- model.regsubsets[criteria_names] %>% data.frame(size = 1:degree) %>% 
+  gather(cp, bic, adjr2, key = "criteria", value = "value") %>% mutate(criteria_label = criteria.plotmath[criteria])
+data_best <- data_plot %>% group_by(criteria) %>% # min of Cp, BIC; max of Adjusted R^2
+top_n(1, ifelse(criteria == "adjr2", value, - value))
+# generate plots of criteria with respect to the number of predictors
+data_plot %>%
+ggplot(aes(x = size, y = value)) +
+geom_line() +
+geom_point(data = data_best, colour = "red", shape = "x", size = 5) +
+geom_vline(data = data_best, aes(xintercept = size), colour = "red", linetype = "dashed") +
+scale_x_continuous(name = "Number of Predictors", breaks = 1:degree) +
+facet_wrap(~ criteria_label, scales = "free_y", labeller = label_parsed)
+```
+According to Adjusted R^2, our optimal model would have 10 predictors.\newline
+According to BIC, our optimal model would have 3 predictors.\newline
+According to Cp, our optimal model would have 7 predictors.\newline
+The results concluded from forward stepwise method are similar to the results from best subset method.
+\newline
+b) Backward Stepwise Selection Method
+```{r}
+model.regsubsets <- regsubsets(Wins ~ ., data = nfl_data,
+method = "backward",
+nvmax = degree) %>% summary()
+
+data_plot <- model.regsubsets[criteria_names] %>% data.frame(size = 1:degree) %>% 
+  gather(cp, bic, adjr2, key = "criteria", value = "value") %>% mutate(criteria_label = criteria.plotmath[criteria])
+data_best <- data_plot %>% group_by(criteria) %>% # min of Cp, BIC; max of Adjusted R^2
+top_n(1, ifelse(criteria == "adjr2", value, - value))
+# generate plots of criteria with respect to the number of predictors
+data_plot %>%
+ggplot(aes(x = size, y = value)) +
+geom_line() +
+geom_point(data = data_best, colour = "red", shape = "x", size = 5) +
+geom_vline(data = data_best, aes(xintercept = size), colour = "red", linetype = "dashed") +
+scale_x_continuous(name = "Number of Predictors", breaks = 1:degree) +
+facet_wrap(~ criteria_label, scales = "free_y", labeller = label_parsed)
+```
+
+According to Adjusted R^2, our optimal model would have 7 predictors.\newline
+According to BIC, our optimal model would have 2 predictors.\newline
+According to Cp, our optimal model would have 6 predictors.\newline
+\newline
+COnsidering the results from all three subset selection methods, we would like to use Mallow's Cp value as the most important criterion for the following reasons: \newline
+1) The optimal number of predictors considering Cp stays quite stable (6, 7, 6)
+2) The value of other criteria when the number of predictors is around 6-7 does not relatively vary significantly from their critical points, whereas Mallow's Cp varies much away from the critical point near at 6 or 7.\newline
+Hence, we come to a conclusion that we will include 6 predictors for predicting the response "Wins" for an NFL team based on its season statistics from the NFL datasets.
+
+3. Fitting our Model and Testing its Performance
+a) Model with 7 variables obtained from Best Subset Selection
+```{r}
+all = regsubsets(Wins~., nfl_data, nbest = 2, nvmax = 7)
+ShowSubsets(all)
+```
+The best subset method yields a result of 7 best predictors: ScoreOff, RushAttOff, RushYdsOff, ScoreDef, RushYdsDef, PassAttDef, FumblesDef. 
+```{r}
+nfl_mod1 = lm(Wins~ScoreOff + RushAttOff + RushYdsOff + ScoreDef + RushYdsDef + PassAttDef + FumblesDef, nfl_data)
+summary(nfl_mod1)
+plot(nfl_mod1, c(1,2,5))
+```
+The predicted value of Wins = 0.24841 + 0.01607*ScoreOff + 0.009381*RushAttOff -0.0012169*RushYdsOff - 0.0138864*ScoreDef + 0.0010504*RushYdsDef + 0.0072325*PassAttDef - 0.0308390*FumblesDef.
+\newline
+\newline
+```{r}
+kfold.cv.lm <- function(X, y, which.betas = rep(TRUE, ncol(X)), k = 10, seed = 0) {
+X <- X[,which.betas]
+data <- data.frame(X, y)
+n <- nrow(data)
+MSEs <- MSPEs <- rep(0, k)
+set.seed(seed)
+ids_fold <- cut(sample(n), breaks = k, labels = 1:k)
+for(fold in 1:k) {
+data_in <- subset(data, fold != ids_fold)
+data_out <- subset(data, fold == ids_fold)
+model <- lm(y ~ ., data = data_in)
+data_in$pred <- predict(model)
+data_out$pred <- predict(model, newdata = data_out)
+MSEs[fold] <- with(data_in, mean((y - pred)^{2}))
+MSPEs[fold] <- with(data_out, mean((y - pred)^{2}))
+}
+return(c(Avg.MSE = mean(MSEs), Avg.MSPE = mean(MSPEs)))
+}
+
+X <- select(nfl_data, - Wins) %>% as.matrix
+y <- nfl_data$Wins
+# full model
+which1 <- rep(TRUE, ncol(X))
+seed <- 424
+kfold1 <- kfold.cv.lm(X, y, which1, 10, seed)
+cat(paste0(paste(rep("#", 80), collapse = ""), "\n"))
+cat("##### Our Model:\n")
+kfold1
+```
+Using seed 424, we used cross validation to test the performance of our model with 7 variables obtained with best subset method. The Average Mean Squared Prediction Error (Avg.MSPE) is 3.148486.
+\newline
+b) 5-fold LASSO Regression and Performance\newline
+We also performed LASSO Regression on our model because LASSO tends to generate models with high power of prediction despite its lack of simplicity. However, since the dimension of our dataset is not so large, we would sacrifice some simplicity for greater accuracy. 
+```{r}
+library(glmnet)
+seed <- 424
+predictors <- select(nfl_data, - Wins) %>% as.matrix()
+response <- nfl_data$Wins
+model.ridge_CV <- cv.glmnet(x = predictors, y = response, nfolds = 10, alpha = 1)
+# reporting the lambda with minimal CV-MSE
+with(model.ridge_CV, data.frame(lambda = lambda, CV_MSE = cvm)) %>%
+top_n(1, - CV_MSE) # minimal CV-MSE
+betas <- coef(model.ridge_CV, s = "lambda.min") %>% as.numeric()
+betas
+```
+The LASSO Regression yields a optimal lambda of 0.08683439 and gives the following model with also 7 variables: Wins = 5.8390266653 + 0.0134088250*ScoreOff + 0.0002564*RushAttOff - 0.0177875389*PassIntOff - 0.0009563607*SackYdsOff - 0.0110562491*ScoreDef + 0.0035465599*PassAttDef + 0.0085213837*PassIntDef. This model has an Avg.MSPE of 3.054585, which is "better" than the previous model. \newline
+```{r}
+library(glmnet)
+library(plotmo) # for plotres
+plotres(model.ridge_CV)
+```
+As we observe in the LASSO model summary above, we find notice that although there's some curvature in the Residuals vs Fitted plot, the overall linearity, zero-mean property, constant variance and normality of residuals are quite satisfied.\newline
+Therefore, our final model for predicting the "Wins" of an NFL team is Wins = 5.8390266653 + 0.0134088250*ScoreOff + 0.0002564*RushAttOff - 0.0177875389*PassIntOff - 0.0009563607*SackYdsOff - 0.0110562491*ScoreDef + 0.0035465599*PassAttDef + 0.0085213837*PassIntDef.
+
+
+
+
+
+
+
+

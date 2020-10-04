@@ -1,0 +1,97 @@
+---
+title: "NFL Playoff Prediction"
+author: "Smells Like Team Spirit"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r}
+library(RCurl)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(GGally)
+library(tidyr)
+library(knitr)
+library(factoextra)
+library(purrr)
+```
+
+NFL teams that performed poorly in win column one year can rise to Super Bowl champions the next (like the Philadelphia Eagles). An NFL game has been sometimes referred to as a “game of inches” in which wins and losses can be determined by chance, hiding the true potential of a team. This could lead to the seemingly surprising rise of a team like the Eagles. We can use machine learning to look beyond just team record to determine which teams that performed poorly last year could compete for a Super Bowl this year. Our goal is to create a machine learning model that groups NFL teams together, predicting a set of playoff teams.
+
+We'd look at  NFL season (2000-2013) that we used to predict "Wins" with a column indicating whether a team makes the playoff or not. to test our model on predicting former playoff teams, and then later we will predict next season’s. 
+
+Since we want to visualize the groupings of NFL teams, we must reduce the dimensionality of all the variable data we collected. To reduce dimensionality, we can use Principal Component Analysis (PCA), which is a statistical procedure that converts a set of variables into a new smaller set of variables that still captures the essence of all the original variables. 
+
+I. PCA
+```{r}
+nfl_playoff_all_data <- read.csv("nfl_playoff_all_data.csv")
+head(nfl_playoff_all_data)
+nfl_data_TY <- subset(nfl_playoff_all_data, YearF != 2013)[c(1,5:29)]
+nfl_data <- subset(nfl_playoff_all_data, YearF != 2013)[c(5:29)]
+nfl_2013 <- subset(nfl_playoff_all_data, YearF == 2013)[c(1,5:29)]
+```
+
+```{r}
+nfl_pca <- prcomp(nfl_data[2:24] , scale = TRUE)
+
+pr.var <- nfl_pca$sdev^2
+pve = pr.var / sum(pr.var)
+plot(cumsum(pve), xlab = "Principal Component", ylab = "Accumulated Proportion of Variance Explained", ylim = c(0,1), type = 'b', 
+     main = "Scree plot: PCA on scaled data")
+
+nfl_pca_scores <- nfl_pca$x
+low_dim_rep <- nfl_pca_scores %>%
+data.frame() %>%
+mutate(TeamYear = nfl_data_TY$TeamYear) %>%
+select(TeamYear, everything())
+
+ggplot(low_dim_rep, aes(x = PC1, y = PC2)) +
+geom_vline(xintercept = 0) +
+geom_hline(yintercept = 0) +
+geom_point(size = 1) + geom_text(aes(label=ifelse(PC1^2+PC2^2 > 19  ,as.character(TeamYear),'')),hjust=1,vjust=0, size = 2.5) +
+scale_x_continuous(breaks = -10:10) +
+coord_cartesian(xlim = c(-8, 4)) +
+theme_light()
+```
+The axes labeled ‘PC1’ and ‘PC2’ represent all the variables we have reduced through PCA. For visual clarity, only some of the teams (plus year) have been labeled. 
+\newline
+\newline
+II. k-means Clustering
+Using the K-Means Elbow Method, we found the ideal number of clusters to be 2. Finally, we can use the K-Means Algorithm to determine and plot the clusters of different types of NFL teams, shown below:
+```{r}
+#fviz_nbclust(nfl_data_TY, kmeans, method = "wss")
+df <- scale(nfl_data_TY[2:25])
+
+fviz_nbclust(df, kmeans, method = "silhouette")
+
+final2 <- kmeans(df, 2, nstart = 25)
+fviz_cluster(final2, data = df)
+table(final2$cluster, nfl_data_TY$Playoff) 
+```
+Clusters represent the quality of teams based on collected input variables. According to the table (0 and 1 represent whether the team makes the playoff, 1 = yes), cluster 1 represents the non-playoff teams and cluster 2 are playoff caliber teams. Cluster 1 contained 5/215 = 2.32% of the playoff teams, while cluster 2 contained 75.4% of the playoff teams. This indicates that teams in cluster 2 were more than 30 times more likely to make the playoffs than cluster 1 teams.\newline
+\newline
+We also tried something new as we manually changed the number of clusters from 2 to 3, which gives us the following result:
+```{r}
+final3 <- kmeans(df, 3, nstart = 25)
+fviz_cluster(final3, data = df)
+table(final3$cluster, nfl_data_TY$Playoff)
+```
+Cluster 1 represents the non-playoff teams, cluster 2 are borderline playoff teams, and cluster 3 are playoff caliber teams. Cluster 1 contained only 1.7% of the playoff teams, cluster 2 contained 44.7% of the playoff teams, while cluster 3 contained only 74.3% of the playoff teams. \newline
+The clustering method with 3 clusters provide more detailed description for mid-table teams, which could be also useful to predict whether a team can make the playoff based on its performance. 
+\newline
+\newline
+Lastly, we apply the K-Means algorithm to the 2013 season to predict its playoff teams, shown below:
+```{r}
+
+dfnew <- scale(nfl_2013[2:25])
+fviz_nbclust(dfnew, kmeans, method = "silhouette")
+testCluster <- kmeans(dfnew, 2, nstart = 10)
+fviz_cluster(testCluster, data = dfnew)
+testCluster$cluster
+nfl_2013$Playoff
+table(testCluster$cluster, nfl_2013$Playoff) 
+```
+The result demonstrates that Cluster 1 of our model predicts 79% of the teams correctly and does represent the playoff caliber teams. Cluster 2 yields a 5.5% of playoff team, showing that clustering really gives an accurate prediction on whether a team makes the NFL playoff based on its performance.
